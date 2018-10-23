@@ -1,62 +1,68 @@
 apiVersion: v1
 kind: Template
+labels:
+  template: anchore-engine-template
 metadata:
   name: "anchore-engine"
   annotation:
     openshift.io/display-name: "Anchore"
-    description: "The Anchore Engine is an open source project that provides a centralized service for inspection, analysis and certification of container images."
-    iconClass: "anchor"
+    description: The Anchore Engine is an open source project that provides a centralized service for inspection, analysis and certification of container images.
     openshift.io/documentation-url: "https://github.com/anchore/anchore-engine"
-  labels:
-    template: "anchore-engine"
-  message: "Anchore api url: ${ANCHORE_FQDN}/v1"
-
-parameters:
-
-- name: ANCHORE_FQDN
-  displayName: "Anchore FQDN"
-  description: "Externally accessible Anchore's hostname"
-  required: true
-  value: ""
-
-- name: ANCHORE_SERVICE_ACCOUNT
-  displayName: "Anchore OC Service account"
-  description: "Anchore OC SA"
-  required: true
-  value: "anchore-engine"
-
-- name: ANCHORE_DB_PASSWORD
-  displayName: "Postgres password"
-  description: "Postgres password for default user postgres"
-  required: true
-  value: ""
-
-- name: ANCHORE_ADMIN_PASSWORD
-  displayName: "Anchore admin password"
-  description: "Anchore password for default user admin"
-  required: true
-  value: ""
-
-
+  message: "Anchore api url: http://{.spec.host}{.spec.path}/v1"
 objects:
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: anchore
+    namespace: ${NAMESPACE}
+
+- apiVersion: v1
+  kind: SecurityContextConstraints
+  metadata:
+    name: scc-anchore
+  priority: 10
+  readOnlyRootFilesystem: false
+  allowPrivilegedContainer: false
+  requiredDropCapabilities:
+  - MKNOD
+  volumes:
+  - configMap
+  - downwardAPI
+  - persistentVolumeClaim
+  - secret
+  runAsUser:
+    type: RunAsAny
+  seLinuxContext:
+    type: MustRunAs
+  fsGroup:
+    type: RunAsAny
+  supplementalGroups:
+    type: RunAsAny
+  users:
+  - system:serviceaccount:${NAMESPACE}:anchore
+  groups:
+  - system:cluster-admins
 
 - kind: Secret
   apiVersion: v1
   metadata:
     name: anchore-secrets
-  stringData: 
-    postgres_user_password: ${ANCHORE_DB_PASSWORD} 
+  stringData:
+    postgres_user_password: ${ANCHORE_DB_PASSWORD}
     anchore_admin_password: ${ANCHORE_ADMIN_PASSWORD}
 
 - kind: Service
   apiVersion: v1
   metadata:
     name: anchore-engine
+    namespace: ${NAMESPACE}
+    labels:
+      app: anchore-engine
     annotations:
-        description: Exposes and load balances the application pods      
+        description: Exposes and load balances the application pods
   spec:
-    selector:                  
-      component: anchore-engine   
+    selector:
+      app: anchore-engine
     ports:
     - name: anchore-engine
       port: 8228
@@ -83,15 +89,22 @@ objects:
   apiVersion: v1
   metadata:
     name: anchore-engine
+    namespace: ${NAMESPACE}
     annotations:
-      description: "Exposes service to conventional hostname"
+      description: Route for anchore-engine service
+      template.openshift.io/expose-uri: http://{.spec.host}{.spec.path}
+    labels:
+      app: anchore-engine
   spec:
-    host: ${ANCHORE_FQDN}
+    tls:
+      insecureEdgeTerminationPolicy: Redirect
+      termination: edge
     port:
       targetPort: anchore-engine
     to:
       kind: Service
       name: anchore-engine
+    wildcardPolicy: None
 
 - kind: ConfigMap
   apiVersion: v1
@@ -106,7 +119,7 @@ objects:
       # be altered for basic operation
       #
       # service_dir: '/config'
-      tmp_dir: '/tmp'
+      # tmp_dir: '/tmp'
       # log_level: 'DEBUG'
       log_level: 'INFO'
       cleanup_images: True
@@ -123,7 +136,7 @@ objects:
       # anchore-engine (enables metric gathering and /metrics route for all
       # services)
       #
-      #metrics: 
+      #metrics:
       #  enabled: True
       #
 
@@ -173,12 +186,12 @@ objects:
         users:
           admin:
             password: '${ANCHORE_ADMIN_PASSWORD}'
-            email: 'admin@adm.in
+            email: 'Auto_RGN-VLG1_Dev@epam.com'
             external_service_auths:
             #  anchoreio:
             #    anchorecli:
             #      auth: 'myanchoreiouser:myanchoreiopass'
-            auto_policy_sync: True
+            # auto_policy_sync: True
 
         database:
           db_connect: 'postgresql+pg8000://postgres:${ANCHORE_DB_PASSWORD}@anchore-postgres:5432/postgres'
@@ -274,28 +287,27 @@ objects:
   apiVersion: v1
   metadata:
     labels:
-      component: anchore-engine 
-    name: anchore-engine 
+      app: anchore-engine
+    name: anchore-engine
+    namespace: ${NAMESPACE}
   spec:
     replicas: 1
     selector:
-      component: anchore-engine 
+      component: anchore-engine
     strategy:
+      type: Recreate
+      activeDeadlineSeconds: 21600
+      recreateParams:
+        timeoutSeconds: 6000
       resources: {}
-      rollingParams:
-        intervalSeconds: 1
-        maxSurge: 25%
-        maxUnavailable: 25%
-        timeoutSeconds: 600
-        updatePeriodSeconds: 1
-      type: Rolling
     template:
       metadata:
         labels:
-          component: anchore-engine 
+          app: anchore-engine
+          deploymentconfig: anchore-engine
       spec:
         containers:
-        - image: docker.io/anchore/anchore-engine:latest
+        - image: docker.io/anchore/anchore-engine:v0.2.4
           imagePullPolicy: Always
           name: anchore-engine
           ports:
@@ -331,14 +343,14 @@ objects:
         dnsPolicy: ClusterFirst
         restartPolicy: Always
         securityContext: {}
-        serviceAccount: ${ANCHORE_SERVICE_ACCOUNT}
-        serviceAccountName: ${ANCHORE_SERVICE_ACCOUNT}
+        serviceAccount: anchore
+        serviceAccountName: anchore
         terminationGracePeriodSeconds: 30
         volumes:
         - configMap:
             defaultMode: 420
             name: anchore-config
-          name: anchore-config 
+          name: anchore-config
     test: false
     triggers:
     - type: ConfigChange
@@ -349,11 +361,12 @@ objects:
   metadata:
     name: "anchore-postgres-storage"
   spec:
+    storageClassName: ${STORAGE_CLASS_NAME}
     accessModes:
-      - "ReadWriteOnce"
+    - ReadWriteOnce
     resources:
       requests:
-        storage: "5Gi"
+        storage: ${ANCHORE_DB_CAPACITY}
 
 - kind: DeploymentConfig
   apiVersion: v1
@@ -365,6 +378,10 @@ objects:
     replicas: 1
     strategy:
       type: Recreate
+      activeDeadlineSeconds: 21600
+      recreateParams:
+        timeoutSeconds: 1200
+      resources: {}
     template:
       metadata:
         name: anchore-postgres
@@ -373,7 +390,8 @@ objects:
           component: anchore-postgres
       spec:
         containers:
-        - env:
+        - name: postgresql
+          env:
           - name: POSTGRESQL_PASSWORD
             valueFrom:
               secretKeyRef:
@@ -381,8 +399,14 @@ objects:
                 key: postgres_user_password
           - name: PGDATA
             value: /var/lib/postgresql/data/pgdata/
-          image: postgres:9
+          image: postgres:9.6
           imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              memory: 1Gi
+          ports:
+          - containerPort: 5432
+            protocol: TCP
           livenessProbe:
             failureThreshold: 3
             initialDelaySeconds: 30
@@ -391,10 +415,6 @@ objects:
             tcpSocket:
               port: 5432
             timeoutSeconds: 1
-          name: postgresql
-          ports:
-          - containerPort: 5432
-            protocol: TCP
           readinessProbe:
             exec:
               command:
@@ -404,13 +424,6 @@ objects:
             periodSeconds: 10
             successThreshold: 1
             timeoutSeconds: 1
-          resources:
-            limits:
-              cpu: 293m
-              memory: 512Mi
-            requests:
-              cpu: 10m
-              memory: 100Mi
           securityContext:
             capabilities: {}
             privileged: false
@@ -444,3 +457,28 @@ objects:
       targetPort: 5432
     selector:
       name: anchore-postgres
+
+parameters:
+- name: NAMESPACE
+  displayName: Current namespace
+  description: OC namespace to deploy into
+  required: true
+  value: edp-cicd-vlg1
+
+- name: ANCHORE_DB_PASSWORD
+  displayName: Postgres password
+  description: Postgres password for default user postgres
+  required: true
+
+- name: ANCHORE_ADMIN_PASSWORD
+  displayName: Anchore admin password
+  description: Anchore password for default user admin
+  required: true
+
+- displayName: Anchore engine database Volume Capacity
+  name: ANCHORE_DB_CAPACITY
+  value: 5Gi
+
+- name: STORAGE_CLASS_NAME
+  displayName: Anchore engine storage class name
+  description: Storage class name to consume by Anchore engine
