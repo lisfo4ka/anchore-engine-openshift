@@ -1,0 +1,446 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: "anchore-engine"
+  annotation:
+    openshift.io/display-name: "Anchore"
+    description: "The Anchore Engine is an open source project that provides a centralized service for inspection, analysis and certification of container images."
+    iconClass: "anchor"
+    openshift.io/documentation-url: "https://github.com/anchore/anchore-engine"
+  labels:
+    template: "anchore-engine"
+  message: "Anchore api url: ${ANCHORE_FQDN}/v1"
+
+parameters:
+
+- name: ANCHORE_FQDN
+  displayName: "Anchore FQDN"
+  description: "Externally accessible Anchore's hostname"
+  required: true
+  value: ""
+
+- name: ANCHORE_SERVICE_ACCOUNT
+  displayName: "Anchore OC Service account"
+  description: "Anchore OC SA"
+  required: true
+  value: "anchore-engine"
+
+- name: ANCHORE_DB_PASSWORD
+  displayName: "Postgres password"
+  description: "Postgres password for default user postgres"
+  required: true
+  value: ""
+
+- name: ANCHORE_ADMIN_PASSWORD
+  displayName: "Anchore admin password"
+  description: "Anchore password for default user admin"
+  required: true
+  value: ""
+
+
+objects:
+
+- kind: Secret
+  apiVersion: v1
+  metadata:
+    name: anchore-secrets
+  stringData: 
+    postgres_user_password: ${ANCHORE_DB_PASSWORD} 
+    anchore_admin_password: ${ANCHORE_ADMIN_PASSWORD}
+
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: anchore-engine
+    annotations:
+        description: Exposes and load balances the application pods      
+  spec:
+    selector:                  
+      component: anchore-engine   
+    ports:
+    - name: anchore-engine
+      port: 8228
+      protocol: TCP
+      targetPort: 8228
+    - name: anchore-catalog
+      port: 8082
+      protocol: TCP
+      targetPort: 8082
+    - name: anchore-simplequeue
+      port: 8083
+      protocol: TCP
+      targetPort: 8083
+    - name: anchore-analyzer
+      port: 8084
+      protocol: TCP
+      targetPort: 8084
+    - name: anchore-policy-engine
+      port: 8087
+      protocol: TCP
+      targetPort: 8087
+
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: anchore-engine
+    annotations:
+      description: "Exposes service to conventional hostname"
+  spec:
+    host: ${ANCHORE_FQDN}
+    port:
+      targetPort: anchore-engine
+    to:
+      kind: Service
+      name: anchore-engine
+
+- kind: ConfigMap
+  apiVersion: v1
+  metadata:
+    name: anchore-config
+  data:
+    config.yaml: |
+      # Anchore Service Configuration File
+      #
+
+      # General system-wide configuration options, these should not need to
+      # be altered for basic operation
+      #
+      # service_dir: '/config'
+      tmp_dir: '/tmp'
+      # log_level: 'DEBUG'
+      log_level: 'INFO'
+      cleanup_images: True
+      # allow_awsecr_iam_auto: False
+      # docker_conn: 'unix://var/run/docker.sock'
+      # docker_conn_timeout: 600
+      host_id: '${ANCHORE_HOST_ID}'
+      internal_ssl_verify: False
+      auto_restart_services: True
+      #catalog_endpoint: 'http://${ANCHORE_ENDPOINT_HOSTNAME}:8082/v1'
+      #
+
+      # Uncomment if you would like to enable prometheus metrics routes in
+      # anchore-engine (enables metric gathering and /metrics route for all
+      # services)
+      #
+      #metrics: 
+      #  enabled: True
+      #
+
+      # Uncomment if you have a local endpoint that can accept
+      # notifications from the anchore-engine, as configured below
+      #
+      #webhooks:
+      #  webhook_user: 'user'
+      #  webhook_pass: 'pass'
+      #  ssl_verify: False
+      #  general:
+      #    url: 'http://localhost:9090/general/<notification_type>/<userId>'
+      #  policy_eval:
+      #    url: 'http://localhost:9090/policy_eval/<userId>'
+      #    webhook_user: 'mehuser'
+      #    webhook_pass: 'mehpass'
+      #  event_log:
+      #    # Uncomment the event_log section in addition to configuring this webhook to receive event log notifications
+      #    url: 'http://localhost:9090/event_log/<userId>'
+
+      # A feeds section is available for override, but shouldn't be
+      # needed. By default, the 'admin' credentials are used if present,
+      # otherwise anonymous access for feed sync is used
+      #
+      #feeds:
+      #  # If set to False, instruct anchore-engine to skip (all) feed sync operations
+      #  sync_enabled: True
+      #  selective_sync:
+      #    # If enabled only sync specific feeds instead of all.
+      #    enabled: True
+      #    feeds:
+      #      vulnerabilities: True
+      #      # Warning: enabling the packages and nvd sync causes the service to require much
+      #      #   more memory to do process the significant data volume. We recommend at least 4GB available for the container
+      #      packages: False
+      #      nvd: False
+      #  anonymous_user_username: anon@ancho.re
+      #  anonymous_user_password: pbiU2RYZ2XrmYQ
+      #  url: 'https://ancho.re/v1/service/feeds'
+      #  client_url: 'https://ancho.re/v1/account/users'
+      #  token_url: 'https://ancho.re/oauth/token'
+      #  connection_timeout_seconds: 3
+      #  read_timeout_seconds: 60
+      #
+
+      credentials:
+        users:
+          admin:
+            password: '${ANCHORE_ADMIN_PASSWORD}'
+            email: 'admin@adm.in
+            external_service_auths:
+            #  anchoreio:
+            #    anchorecli:
+            #      auth: 'myanchoreiouser:myanchoreiopass'
+            auto_policy_sync: True
+
+        database:
+          db_connect: 'postgresql+pg8000://postgres:${ANCHORE_DB_PASSWORD}@anchore-postgres:5432/postgres'
+          db_connect_args:
+            timeout: 120
+            ssl: False
+          db_pool_size: 30
+          db_pool_max_overflow: 100
+      services:
+        apiext:
+          enabled: True
+          require_auth: True
+          endpoint_hostname: '${ANCHORE_ENDPOINT_HOSTNAME}'
+          listen: '0.0.0.0'
+          port: 8228
+          authorization_handler: native
+        kubernetes_webhook:
+          enabled: True
+          require_auth: False
+          endpoint_hostname: '${ANCHORE_ENDPOINT_HOSTNAME}'
+          listen: '0.0.0.0'
+          port: 8338
+        catalog:
+          enabled: True
+          require_auth: True
+          endpoint_hostname: '${ANCHORE_ENDPOINT_HOSTNAME}'
+          listen: '0.0.0.0'
+          port: 8082
+      # NOTE: use the below external_* parameters to define the port/tls
+      # setting that will allow other internal services to access this
+      # service - if left unset services will use the above,
+      # e.g. http://<endpoint_hostname>:<port>
+      #    external_port: 8082
+      #    external_tls: False
+          archive:
+            compression:
+              enabled: False
+              min_size_kbytes: 100
+            storage_driver:
+              name: db
+              config: {}
+          cycle_timer_seconds: '1'
+          cycle_timers:
+            image_watcher: 3600
+            policy_eval: 3600
+            vulnerability_scan: 14400
+            analyzer_queue: 1
+            notifications: 30
+            service_watcher: 15
+            policy_bundle_sync: 300
+            repo_watcher: 60
+      # Uncomment if you would like to receive notifications for events triggered by asynchronous operations in the system.
+      # In addition, uncomment the webhooks section and supply the configuration for either a 'general' or an 'event_log' webhook
+      #    event_log:
+      #      notification:
+      #        enabled: True
+      #        # (optional) notify events that match these levels. If this section is commented, notifications for all events are sent
+      #        level:
+      #        - error
+        simplequeue:
+          enabled: True
+          require_auth: True
+          endpoint_hostname: '${ANCHORE_ENDPOINT_HOSTNAME}'
+          listen: '0.0.0.0'
+          port: 8083
+      #    external_port: 8083
+      #    external_tls: False
+        analyzer:
+          enabled: True
+          require_auth: True
+          cycle_timer_seconds: 1
+          max_threads: 1
+          analyzer_driver: 'nodocker'
+          endpoint_hostname: '${ANCHORE_ENDPOINT_HOSTNAME}'
+          listen: '0.0.0.0'
+          port: 8084
+      #    external_port: 8084
+      #    external_tls: False
+        policy_engine:
+          enabled: True
+          require_auth: True
+          endpoint_hostname: '${ANCHORE_ENDPOINT_HOSTNAME}'
+          listen: '0.0.0.0'
+          port: 8087
+      #    external_port: 8087
+      #    external_tls: False
+          cycle_timer_seconds: 1
+          cycle_timers:
+            feed_sync: 21600 # 6 hours between feed syncs
+            feed_sync_checker: 3600 # 1 hour between checks to see if there needs to be a task queued
+
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    labels:
+      component: anchore-engine 
+    name: anchore-engine 
+  spec:
+    replicas: 1
+    selector:
+      component: anchore-engine 
+    strategy:
+      resources: {}
+      rollingParams:
+        intervalSeconds: 1
+        maxSurge: 25%
+        maxUnavailable: 25%
+        timeoutSeconds: 600
+        updatePeriodSeconds: 1
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          component: anchore-engine 
+      spec:
+        containers:
+        - image: docker.io/anchore/anchore-engine:latest
+          imagePullPolicy: Always
+          name: anchore-engine
+          ports:
+            - containerPort: 8228
+              protocol: TCP
+            - containerPort: 8082
+              protocol: TCP
+            - containerPort: 8083
+              protocol: TCP
+            - containerPort: 8084
+              protocol: TCP
+            - containerPort: 8087
+              protocol: TCP
+          env:
+          - name: ANCHORE_HOST_ID
+            value: anchore-engine
+          - name: ANCHORE_ENDPOINT_HOSTNAME
+            value: anchore-engine
+          - name: ANCHORE_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: anchore-secrets
+                key: postgres_user_password
+          - name: ANCHORE_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: anchore-secrets
+                key: anchore_admin_password
+          volumeMounts:
+          - mountPath: /config/config.yaml
+            name: anchore-config
+            subPath: config.yaml
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        securityContext: {}
+        serviceAccount: ${ANCHORE_SERVICE_ACCOUNT}
+        serviceAccountName: ${ANCHORE_SERVICE_ACCOUNT}
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - configMap:
+            defaultMode: 420
+            name: anchore-config
+          name: anchore-config 
+    test: false
+    triggers:
+    - type: ConfigChange
+
+
+- kind: PersistentVolumeClaim
+  apiVersion: v1
+  metadata:
+    name: "anchore-postgres-storage"
+  spec:
+    accessModes:
+      - "ReadWriteOnce"
+    resources:
+      requests:
+        storage: "5Gi"
+
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    annotations:
+      iconClass: icon-postgresql
+    name: anchore-postgres
+  spec:
+    replicas: 1
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        name: anchore-postgres
+        labels:
+          name: anchore-postgres
+          component: anchore-postgres
+      spec:
+        containers:
+        - env:
+          - name: POSTGRESQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: anchore-secrets
+                key: postgres_user_password
+          - name: PGDATA
+            value: /var/lib/postgresql/data/pgdata/
+          image: postgres:9
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            tcpSocket:
+              port: 5432
+            timeoutSeconds: 1
+          name: postgresql
+          ports:
+          - containerPort: 5432
+            protocol: TCP
+          readinessProbe:
+            exec:
+              command:
+              - /usr/libexec/check-container
+            failureThreshold: 3
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          resources:
+            limits:
+              cpu: 293m
+              memory: 512Mi
+            requests:
+              cpu: 10m
+              memory: 100Mi
+          securityContext:
+            capabilities: {}
+            privileged: false
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - mountPath: /var/lib/pgsql/data
+            name: anchore-postgres-storage
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - name: anchore-postgres-storage
+          persistentVolumeClaim:
+            claimName: anchore-postgres-storage
+    test: false
+    triggers:
+    - type: ConfigChange
+
+- kind: Service
+  apiVersion: v1
+  metadata:
+    labels:
+      component: anchore-postgres
+    name: anchore-postgres
+  spec:
+    ports:
+    - name: postgresql
+      port: 5432
+      protocol: TCP
+      targetPort: 5432
+    selector:
+      name: anchore-postgres
