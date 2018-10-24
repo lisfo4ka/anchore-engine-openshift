@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: "anchore-engine-scc"
+  annotation:
+    openshift.io/display-name: "Anchore-engine Security Context Constraints"
+    openshift.io/documentation-url: "https://github.com/anchore/anchore-engine"
+objects:
+- apiVersion: v1
+  kind: SecurityContextConstraints
+  metadata:
+    name: scc-anchore
+  priority: 10
+  readOnlyRootFilesystem: false
+  allowedCapabilities:
+  - '*'
+  allowHostDirVolumePlugin: true
+  allowPrivilegedContainer: false
+  volumes:
+  - configMap
+  - downwardAPI
+  - persistentVolumeClaim
+  - secret
+  - hostPath
+  runAsUser:
+    type: RunAsAny
+  seLinuxContext:
+    type: MustRunAs
+  fsGroup:
+    type: RunAsAny
+  supplementalGroups:
+    type: RunAsAny
+  users:
+  - system:serviceaccount:${NAMESPACE}:anchore-engine
+  groups:
+  - system:cluster-admins
+
+parameters:
+- name: NAMESPACE
+  displayName: Current namespace
+  description: OC namespace to deploy into
+  required: true
+  value: edp-cicd-vlg1

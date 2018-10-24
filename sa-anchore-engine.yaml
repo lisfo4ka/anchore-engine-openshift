@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: "anchore-engine-sa"
+  annotation:
+    openshift.io/display-name: "Anchore-engine Service account"
+    openshift.io/documentation-url: "https://github.com/anchore/anchore-engine"
+objects:
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: anchore-engine
+    namespace: ${NAMESPACE}
+
+parameters:
+- name: NAMESPACE
+  displayName: Current namespace
+  description: OC namespace to deploy into
+  value: edp-cicd-vlg1

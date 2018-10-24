@@ -10,39 +10,6 @@ metadata:
     openshift.io/documentation-url: "https://github.com/anchore/anchore-engine"
   message: "Anchore api url: http://{.spec.host}{.spec.path}/v1"
 objects:
-- apiVersion: v1
-  kind: ServiceAccount
-  metadata:
-    name: anchore
-    namespace: ${NAMESPACE}
-
-- apiVersion: v1
-  kind: SecurityContextConstraints
-  metadata:
-    name: scc-anchore
-  priority: 10
-  readOnlyRootFilesystem: false
-  allowPrivilegedContainer: false
-  requiredDropCapabilities:
-  - MKNOD
-  volumes:
-  - configMap
-  - downwardAPI
-  - persistentVolumeClaim
-  - secret
-  runAsUser:
-    type: RunAsAny
-  seLinuxContext:
-    type: MustRunAs
-  fsGroup:
-    type: RunAsAny
-  supplementalGroups:
-    type: RunAsAny
-  users:
-  - system:serviceaccount:${NAMESPACE}:anchore
-  groups:
-  - system:cluster-admins
-
 - kind: Secret
   apiVersion: v1
   metadata:
@@ -119,7 +86,7 @@ objects:
       # be altered for basic operation
       #
       # service_dir: '/config'
-      # tmp_dir: '/tmp'
+      tmp_dir: '/tmp'
       # log_level: 'DEBUG'
       log_level: 'INFO'
       cleanup_images: True
@@ -191,10 +158,10 @@ objects:
             #  anchoreio:
             #    anchorecli:
             #      auth: 'myanchoreiouser:myanchoreiopass'
-            # auto_policy_sync: True
+            auto_policy_sync: True
 
         database:
-          db_connect: 'postgresql+pg8000://postgres:${ANCHORE_DB_PASSWORD}@anchore-postgres:5432/postgres'
+          db_connect: 'postgresql+pg8000://postgres:${ANCHORE_DB_PASSWORD}@${ANCHORE_DB_HOST}:5432/postgres'
           db_connect_args:
             timeout: 120
             ssl: False
@@ -293,7 +260,7 @@ objects:
   spec:
     replicas: 1
     selector:
-      component: anchore-engine
+      deploymentconfig: anchore-engine
     strategy:
       type: Recreate
       activeDeadlineSeconds: 21600
@@ -343,8 +310,8 @@ objects:
         dnsPolicy: ClusterFirst
         restartPolicy: Always
         securityContext: {}
-        serviceAccount: anchore
-        serviceAccountName: anchore
+        serviceAccount: anchore-engine
+        serviceAccountName: anchore-engine
         terminationGracePeriodSeconds: 30
         volumes:
         - configMap:
@@ -464,6 +431,12 @@ parameters:
   description: OC namespace to deploy into
   required: true
   value: edp-cicd-vlg1
+
+- name: ANCHORE_DB_HOST
+  displayName: Postgres host
+  description: Postgres DB host endpoint
+  required: true
+  value: anchore-postgres
 
 - name: ANCHORE_DB_PASSWORD
   displayName: Postgres password
