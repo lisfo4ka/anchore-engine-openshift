@@ -8,36 +8,37 @@ metadata:
 objects:
 - apiVersion: v1
   kind: SecurityContextConstraints
-  metadata:
-    name: scc-anchore
-  priority: 10
-  readOnlyRootFilesystem: false
   allowedCapabilities:
   - '*'
-  allowHostDirVolumePlugin: true
-  allowPrivilegedContainer: false
-  volumes:
-  - configMap
-  - downwardAPI
-  - persistentVolumeClaim
-  - secret
-  - hostPath
+  fsGroup:
+    type: RunAsAny
+  groups:
+  - system:cluster-admins
+  metadata:
+    annotations:
+      kubernetes.io/description: anchore-engine provides all features of the restricted SCC
+        but allows users to run with any UID and any GID.
+    name: anchore-engine
+  priority: 15
+  readOnlyRootFilesystem: false
   runAsUser:
     type: RunAsAny
   seLinuxContext:
     type: MustRunAs
-  fsGroup:
-    type: RunAsAny
   supplementalGroups:
     type: RunAsAny
   users:
   - system:serviceaccount:${NAMESPACE}:anchore-engine
-  groups:
-  - system:cluster-admins
+  volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - persistentVolumeClaim
+  - projected
+  - secret
 
 parameters:
 - name: NAMESPACE
   displayName: Current namespace
   description: OC namespace to deploy into
-  required: true
   value: edp-cicd-vlg1
